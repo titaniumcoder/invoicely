@@ -1,7 +1,7 @@
 [project]
 name = "invoicely"
 version = "0.1.0"
-description = "Add your description here"
+description = "This is a simple chatbot example for myself to automatically create invoices that are auto-translated to bulgarian and signed for auditing. requirements for bulgarian tax logic and a good example on how to integrate an llm with external tools."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = []
