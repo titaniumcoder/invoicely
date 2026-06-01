@@ -1,102 +1,41 @@
 from dotenv import load_dotenv
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Header, Footer, Static, Button, DataTable
-from textual.screen import Screen
-from textual import on
-from datetime import datetime
-
-import typer
+from textual.containers import HorizontalGroup, VerticalScroll
+from textual.widgets import Footer, Header, Button, Digits
 
 load_dotenv()
 
-app = typer.Typer()
+class TimeDisplay(Digits):
+    """A widget to display the time."""
 
-class Dashboard(Screen):
+class Stopwatch(HorizontalGroup):
+    """A Stopwatch widget."""
+
     def compose(self) -> ComposeResult:
+        """Create child widgets for the stopwatch."""
+        yield Button("Start", id="start", variant="success")
+        yield Button("Stop", id="stop", variant="error")
+        yield Button("Reset", id="reset")
+        yield TimeDisplay("00:00:00")
+
+class StopwatchApp(App):
+    """A Textual app to display a stopwatch."""
+
+    BINDINGS = [("d", "toggle_dark", "Toggle dark mode")]
+
+    def compose(self) -> ComposeResult:
+        """Create child widgets for the app."""
         yield Header()
         yield Footer()
+        yield VerticalScroll(Stopwatch(), Stopwatch(), Stopwatch())
 
-        with Container():
-            yield Static(f"Dashboard - {datetime.now().strftime('%Y-%m-%d %H:%M')}", classes="title")
-
-            with Horizontal():
-                yield Static("Open Invoices\n[bold red]12[/]", classes="metric")
-                yield Static("Paid Invoices\n[bold green]47[/]", classes="metric")
-                yield Static("Earned (12m)\n[bold green]$184,230[/]", classes="metric")
-                yield Static("Expenses (12m)\n[bold red]$63,450[/]", classes="metric")
-
-            yield Static("\nPress 'i' for Invoices, 't' for Timesheets, 'q' to quit", classes="hint")
-
-class InvoicesScreen(Screen):
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Footer()
-        yield Static("📋 Invoices", classes="title")
-
-        table = DataTable()
-        table.add_columns("ID", "Client", "Amount", "Status", "Due Date")
-        table.add_rows([
-            ("INV-001", "Acme Corp", "$2,400", "Open", "2026-06-15"),
-            ("INV-002", "Stark Industries", "$8,750", "Paid", "2026-05-20"),
-            # ... more rows
-        ])
-        yield table
-
-        yield Button("Back to Dashboard", id="back")
-
-class TimesheetsScreen(Screen):
-    def compose(self) -> ComposeResult:
-        yield Header()
-        yield Footer()
-        yield Static("⏱️ Timesheets", classes="title")
-
-        table = DataTable()
-        table.add_columns("ID", "Client", "Amount", "Status", "Due Date")
-        table.add_rows([
-            ("INV-001", "Acme Corp", "$2,400", "Open", "2026-06-15"),
-            ("INV-002", "Stark Industries", "$8,750", "Paid", "2026-05-20"),
-            # ... more rows
-        ])
-        yield table
-
-        yield Button("Back to Dashboard", id="back")
-
-
-class MainApp(App):
-    CSS_PATH = "app.tcss"  # optional styling
-
-    # Register screens by name so key bindings work
-    SCREENS = {
-        "dashboard": Dashboard,
-        "invoices": InvoicesScreen,
-        "timesheets": TimesheetsScreen,
-    }
-
-    BINDINGS = [
-        ("d", "switch_mode('dashboard')", "Dashboard"),
-        ("i", "push_screen('invoices')", "Invoices"),
-        ("t", "push_screen('timesheets')", "Timesheets"),
-        ("q", "quit", "Quit"),
-    ]
-
-    def on_mount(self) -> None:
-        self.push_screen(Dashboard())
-
-    def action_switch_mode(self, mode: str):
-        if mode == "dashboard":
-            self.push_screen(Dashboard())
-        elif mode == "invoices":
-            self.push_screen(InvoicesScreen())
-        elif mode == "timesheets":
-            self.push_screen(TimesheetsScreen())
-
-    @on(Button.Pressed, "#back")
-    def back_to_dashboard(self):
-        self.pop_screen()
-
+    def action_toggle_dark(self) -> None:
+        """An action to toggle dark mode."""
+        self.theme = (
+            "textual-dark" if self.theme == "textual-light" else "textual-light"
+        )
 
 if __name__ == "__main__":
-    app = MainApp()
+    app = StopwatchApp()
     app.run()

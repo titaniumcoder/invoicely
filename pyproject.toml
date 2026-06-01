@@ -9,5 +9,4 @@ dependencies = [
     "rich>=15.0.0",
     "textual>=8.2.7",
     "textual-dev>=1.8.0",
-    "typer>=0.26.4",
 ]
