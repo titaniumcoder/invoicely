@@ -1,13 +1,50 @@
 from dotenv import load_dotenv
 
+from time import monotonic
+
 from textual.app import App, ComposeResult
 from textual.containers import HorizontalGroup, VerticalScroll
 from textual.widgets import Footer, Header, Button, Digits
+from textual.reactive import reactive
 
 load_dotenv()
 
 class TimeDisplay(Digits):
     """A widget to display the time."""
+
+    start_time = reactive(monotonic)
+    time = reactive(0.0)
+    total = reactive(0.0)
+
+    def on_mount(self) -> None:
+        """Event handler called when widget is added to the app."""
+        self.update_timer = self.set_interval(1 / 60, self.update_time, pause=True)
+    
+    def update_time(self) -> None:
+        """Method to update the time to the current time."""
+        self.time = self.total + (monotonic() - self.start_time)
+    
+    def watch_time(self, time: float) -> None:
+        """Called when the time attribute changes."""
+        minutes, seconds = divmod(time, 60)
+        hours, minutes = divmod(minutes, 60)
+        self.update(f"{hours:02,.0f}:{minutes:02.0f}:{seconds:05.2f}")
+
+    def start(self) -> None:
+        """Method to start (or resume) time updating."""
+        self.start_time = monotonic()
+        self.update_timer.resume()
+
+    def stop(self) -> None:
+        """Method to stop the time display updating."""
+        self.update_timer.pause()
+        self.total += monotonic() - self.start_time
+        self.time = self.total
+
+    def reset(self) -> None:
+        """Method to reset the time display."""
+        self.time = 0
+        self.total = 0
 
 class Stopwatch(HorizontalGroup):
     """A Stopwatch widget."""
@@ -17,11 +54,26 @@ class Stopwatch(HorizontalGroup):
         yield Button("Start", id="start", variant="success")
         yield Button("Stop", id="stop", variant="error")
         yield Button("Reset", id="reset")
-        yield TimeDisplay("00:00:00")
+        yield TimeDisplay()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Event handler called when a button is pressed."""
+        button_i = event.button.id
+        time_display = self.query_one(TimeDisplay)
+
+        if event.button.id == "start":
+            time_display.start()
+            self.add_class("started")
+        elif event.button.id == "stop":
+            time_display.stop()
+            self.remove_class("started")
+        elif event.button.id == "reset":
+            time_display.reset()
 
 class StopwatchApp(App):
     """A Textual app to display a stopwatch."""
 
+    CSS_PATH = "stopwatch.tcss"
     BINDINGS = [("d", "toggle_dark", "Toggle dark mode")]
 
     def compose(self) -> ComposeResult:
