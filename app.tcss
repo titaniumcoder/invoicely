@@ -1,0 +1,82 @@
+/* app.tcss - Simple styling */
+
+Screen {
+    background: #1a1a1a;
+}
+
+Header {
+    background: #2a2a2a;
+    color: #00ddff;
+    text-style: bold;
+}
+
+Footer {
+    background: #2a2a2a;
+    color: #888888;
+}
+
+/* Titles */
+.title {
+    color: #00ddff;
+    text-style: bold;
+    margin: 1 0;
+    text-align: center;
+    width: 100%;
+}
+
+/* Metrics */
+.metrics {
+    margin: 2 0;
+    height: auto;
+}
+
+.metric {
+    background: #2a2a2a;
+    border: tall #444444;
+    padding: 1 2;
+    margin: 0 1;
+    width: 1fr;
+    text-align: center;
+    height: 5;
+}
+
+/* Tables */
+DataTable {
+    margin: 1 0;
+    border: tall #444444;
+}
+
+DataTable.--zebra-odd {
+    background: #222222;
+}
+
+/* Buttons */
+Button {
+    background: #0066aa;
+    color: white;
+    border: tall #0088ff;
+    padding: 0 2;
+    margin: 1 0;
+}
+
+Button:hover {
+    background: #0088ff;
+}
+
+.back-btn {
+    margin-top: 2;
+}
+
+/* Hint text */
+.hint {
+    color: #666666;
+    text-align: center;
+    margin-top: 2;
+}
+
+/* Placeholder text */
+.placeholder {
+    color: #555555;
+    text-align: center;
+    margin: 5 0;
+}
