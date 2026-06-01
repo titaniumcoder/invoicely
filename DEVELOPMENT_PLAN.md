@@ -64,19 +64,33 @@ Practical notes:
   refactors must keep the approved tests green, and any behavior change starts
   again at gate 1.
 
-### A note on the stack version
+### Who implements: MANUAL vs Claude-led
 
-The brief lists **Python 3.12**, but the repo is configured for **3.13**
-(`.python-version`, `requires-python = ">=3.13"`, installed 3.13.5). This plan
-targets **3.13**. If 3.12 is a hard requirement (e.g. for a dependency that lags
-on 3.13), downgrade `requires-python` and `.python-version` first — decide this
-in Phase 0 before locking dependencies.
+Each Step / Task below carries an ownership marker:
+
+- **🔨 MANUAL (human-led)** — the user writes the implementation **by hand**.
+  These are deliberately kept manual to keep the craft sharp (typically things
+  the user hasn't done before and wants to learn). **Claude Code never completes
+  a MANUAL task end-to-end.** Its role is strictly **supportive**: explain
+  approaches, sketch options, review the user's code, write/critique tests at the
+  test gate, debug a specific failure the user is stuck on, look up APIs. Claude
+  does **not** write the bulk of the production code for these, does not "just
+  finish it", and does not pre-empt the learning by handing over a complete
+  solution. When asked to help on a MANUAL task, default to the smallest useful
+  nudge and let the user drive.
+- **_Claude-led_** — Claude Code may implement the production code directly,
+  still inside the test-first, human-gated cycle above (tests approved first,
+  manual testing gate after).
+
+The marker only governs *who writes the implementation*. **Every step — manual or
+Claude-led — goes through the same gated cycle**: tests first, user-approved,
+then implementation, then the manual-testing gate.
 
 ---
 
 ## 1. Project Setup
 
-### 1.1 Tooling & dependencies (`uv`)
+### 1.1 Tooling & dependencies (`uv`) — **🔨 MANUAL (human-led)**
 
 Pin dependencies in `pyproject.toml` via `uv add`. Grouped by concern:
 
@@ -93,7 +107,10 @@ uv add httpx          # Toggl, Skribble, Revolut HTTP clients
 uv add deepl          # official DeepL SDK
 
 # PDF + signing
-uv add weasyprint pyhanko pyhanko-certvalidator jinja2
+uv add pyhanko pyhanko-certvalidator jinja2
+# WeasyPrint is NOT a host dependency — it runs inside a podman container
+# (see 1.1). Jinja2 renders the HTML on the host; only HTML->PDF goes to the
+# container. pyHanko signs the resulting bytes on the host.
 
 # Dev tooling
 uv add --dev pytest pytest-cov pytest-httpx respx ruff mypy types-PyYAML
@@ -106,12 +123,21 @@ uv add --dev pytest pytest-cov pytest-httpx respx ruff mypy types-PyYAML
   are just their serialized form. This gives validation for free on load.
 - **httpx** (sync) for all API clients — one consistent client style, easy to
   mock with `respx` in tests.
-- **WeasyPrint** needs native libs (`pango`, `cairo`, `gdk-pixbuf`,
-  `libffi`). Document the `brew install` line; surface a clear error if missing.
+- **WeasyPrint** needs native libs (`pango`, `cairo`, `gdk-pixbuf`, `libffi`)
+  that are fragile and cryptic to install on macOS. **Decision: do not install
+  WeasyPrint on the host. Run it inside a podman container** (podman is already
+  on this machine). The host renders the Jinja2 template to an HTML string and
+  pipes it to a small WeasyPrint image (HTML in → PDF out); the resulting bytes
+  come back to the host for signing with pyHanko. This keeps the brittle native
+  stack pinned and reproducible inside the image and off the Mac entirely.
 
-**Challenge — WeasyPrint native deps on macOS:** failures are cryptic. Mitigate
-with a `invoicely doctor` command (see 1.5) that imports WeasyPrint and reports
-missing system libraries with the exact `brew` fix.
+**Challenge — WeasyPrint via podman:** the failure mode moves from "missing
+brew libs" to "podman not running / image not built". Mitigate with the
+`invoicely doctor` command (see 1.5): check `podman` is on `PATH`, the machine
+is up, and the WeasyPrint image is present (build it on first run if missing),
+then do a tiny round-trip render to confirm the pipe works. Bundle the
+container definition (`Containerfile`) and the BG-glyph fonts in the repo so the
+image is reproducible.
 
 ### 1.2 Folder structure (the repo)
 
@@ -238,7 +264,8 @@ the password from the keychain or `.env`, never from a synced file.
 ### 1.5 First runnable artifact
 
 Before any feature: make `uv run python main.py` (and `invoicely doctor`) work.
-`doctor` checks: env vars present, data dir reachable, WeasyPrint imports,
+`doctor` checks: env vars present, data dir reachable, **podman available + the
+WeasyPrint image present and able to do a round-trip render**,
 OpenAI/DeepL/Toggl reachable (cheap auth ping), signing cert loadable. This is
 the smoke test the user runs after setup and the diagnostic for every later bug.
 
@@ -252,7 +279,7 @@ dual-language invoice PDF saved to Proton Drive, via a terminal chat."*
 Build bottom-up: deterministic core first, integrations next, agent last. Each
 step below is independently testable.
 
-### Step 0 — Domain models (`models/`)
+### Step 0 — Domain models (`models/`) — **🔨 MANUAL (human-led)**
 - **Files:** `models/invoice.py`, `models/timesheet.py`, `models/client.py`.
 - Define `Money` (wraps `Decimal`, fixed currency, no float ever), `Party`,
   `VatTreatment` (enum: `BG_STANDARD_20`, `EU_REVERSE_CHARGE`, `NON_EU_ZERO`),
@@ -264,7 +291,7 @@ step below is independently testable.
 - **Risk:** rounding. Fix a rounding policy (round half-up, 2 dp, per-line then
   sum) and encode it once in `domain/totals.py`.
 
-### Step 1 — YAML storage layer (`storage/`)
+### Step 1 — YAML storage layer (`storage/`) — _Claude-led_
 - **Files:** `storage/yaml_store.py`, `storage/locking.py`, `storage/numbering.py`.
 - Atomic write helper; load-with-validation (YAML → Pydantic); a `schema_version`
   field on every document for forward migration.
@@ -282,7 +309,7 @@ step below is independently testable.
   Allocate-and-commit in one locked transaction; reconcile on startup by scanning
   existing invoice files and warning on any gap, duplicate, or date-order violation.
 
-### Step 2 — VAT & totals engine (`domain/vat.py`, `domain/totals.py`)
+### Step 2 — VAT & totals engine (`domain/vat.py`, `domain/totals.py`) — **🔨 MANUAL (human-led)**
 - Resolve effective VAT per line: per-line override falls back to invoice
   default. Implement the three treatments and the legally-required note text each
   one stamps on the invoice (e.g. reverse-charge clause, Art. references).
@@ -293,7 +320,7 @@ step below is independently testable.
   not hardcoded in Python, so it can be corrected without code changes.
 - **Heavy test target** — this is pure functions; cover it exhaustively (2.7).
 
-### Step 3 — Toggl integration (`integrations/toggl.py`, `domain/grouping.py`)
+### Step 3 — Toggl integration (`integrations/toggl.py`, `domain/grouping.py`) — _Claude-led_
 - Fetch time entries for a date range + workspace via Toggl Reports/Track API
   (httpx, token auth). Normalize into `TimeEntry` models.
 - **Grouping:** auto-group by project + description into candidate line items
@@ -302,7 +329,7 @@ step below is independently testable.
   round per-entry or per-group, to what precision — make it a config knob).
 - **Test:** record a real Reports API response as a fixture; test grouping offline.
 
-### Step 4 — DeepL translation (`integrations/deepl_client.py`)
+### Step 4 — DeepL translation (`integrations/deepl_client.py`) — **🔨 MANUAL (human-led)**
 - Translate line descriptions EN → BG. **Cache** translations (keyed by source
   text hash) in the Drive folder so repeated descriptions aren't re-billed/re-sent.
 - **Decision:** translation is suggestion, not gospel — the chat lets the user
@@ -310,7 +337,7 @@ step below is independently testable.
 - **Challenge:** DeepL formality/glossary for domain terms. Support a per-client
   glossary file to keep terminology consistent across invoices.
 
-### Step 5 — RAG over contracts + old invoices (`rag/`)
+### Step 5 — RAG over contracts + old invoices (`rag/`) — **🔨 MANUAL (human-led)**
 - **Files:** `rag/index.py`, `rag/retriever.py`, `invoicely reindex` command.
 - Chunk + embed contract text and prior invoices into a **persistent Chroma**
   store under `rag/`. Use OpenAI embeddings. Index manifest tracks source file
@@ -320,8 +347,10 @@ step below is independently testable.
 - **Challenge:** PDFs need text extraction; scanned contracts need OCR (defer OCR
   — document the limitation, ingest text-based PDFs/`.txt`/`.md` first).
 
-### Step 6 — PDF generation (`pdf/render.py` + templates)
-- Jinja2 HTML templates → WeasyPrint → PDF bytes. **Dual-language** layout:
+### Step 6 — PDF generation (`pdf/render.py` + templates) — _Claude-led_
+- Jinja2 HTML templates → **WeasyPrint in a podman container** → PDF bytes (see
+  1.1: host renders HTML, container does HTML→PDF, bytes return to host).
+  **Dual-language** layout:
   EN + BG side-by-side or stacked per field. Must include all Bulgarian-mandated
   invoice fields (numbers, VAT ids, dates, treatment notes, totals breakdown).
 - **Decision:** template-driven so layout changes don't touch Python. Render
@@ -330,7 +359,7 @@ step below is independently testable.
   coverage (e.g. a Noto/DejaVu family) and reference it in `styles.css`; verify
   glyphs actually embed in the output PDF.
 
-### Step 7 — Digital signing (`pdf/sign.py`)
+### Step 7 — Digital signing (`pdf/sign.py`) — **🔨 MANUAL (human-led)**
 - Sign the generated PDF with **pyHanko** using the `.pfx` cert. Visible or
   invisible signature (decide; invisible is simplest for MVP).
 - **Decision:** sign as the final, separate step on the rendered bytes, so an
@@ -339,7 +368,7 @@ step below is independently testable.
   cert chain validation. Keep signing config in `.env`; fail loudly if the cert
   can't be loaded (covered by `doctor`).
 
-### Step 8 — Agent + tools (`agent/`)
+### Step 8 — Agent + tools (`agent/`) — **🔨 MANUAL (human-led)**
 - **Files:** `agent/tools.py`, `agent/graph.py`, `agent/prompts.py`,
   `agent/session.py`.
 - LangGraph **ReAct** agent over GPT-4o. Wrap deterministic functions as tools:
@@ -353,13 +382,13 @@ step below is independently testable.
   reasons over real data. Confirmation is a tool too (`request_confirmation`),
   keeping the human-in-the-loop gate explicit and testable.
 
-### Step 9 — Terminal chat UI (`tui/chat.py`, `tui/render.py`)
+### Step 9 — Terminal chat UI (`tui/chat.py`, `tui/render.py`) — **🔨 MANUAL (human-led)**
 - Rich REPL: stream agent responses, render draft invoices as tables, show a
   clear diff/preview before confirmation, pretty-print errors.
 - **Decision:** previews render the *actual* computed invoice (same totals
   engine), not the LLM's description of it.
 
-### Step 10 — Conversation history (`agent/session.py`)
+### Step 10 — Conversation history (`agent/session.py`) — _Claude-led_
 - Persist turns to `history/<session-id>.jsonl` in the Drive folder. Allow
   resuming a session. Keep it append-only (sync-friendly).
 
@@ -616,7 +645,7 @@ describe *what* each kind of test covers; §0 describes *when* it is written and
 | Signing key exposure | config/sign | `.pfx` outside synced folder, password from env/keychain |
 | Long async signing waits | Feature 1 | state on disk, polling, resumable |
 | Multi-currency / partial payments | Features 2–3 | normalize FX for compare, store original, many-to-many allocation |
-| WeasyPrint native deps | setup | `doctor` command with actionable error |
+| WeasyPrint native deps | setup, pdf | run WeasyPrint in a podman container (off the host); `doctor` checks podman + image with actionable error |
 
 ---
 
